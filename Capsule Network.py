@@ -19,7 +19,7 @@ USE_CUDA = True
 global_step_train = 0
 n_epochs = 30
 batch_size = 100
-summary_prefix = 'tmp'
+summary_prefix = 'test_weight_decay_0.0001'
 summary_dir = 'runs/{0}'.format(summary_prefix + datetime.now().strftime("%b %d %Y %H:%M:%S"))
 
 # %%
@@ -220,7 +220,7 @@ class Writer():
 capsule_net = CapsNet()
 if USE_CUDA:
     capsule_net = capsule_net.cuda()
-optimizer = Adam(capsule_net.parameters(), weight_decay=0.001)
+optimizer = Adam(capsule_net.parameters(), weight_decay=0.0001)
 
 
 # %%
