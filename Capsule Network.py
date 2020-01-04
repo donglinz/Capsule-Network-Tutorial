@@ -2,6 +2,7 @@
 # To add a new markdown cell, type '# %% [markdown]'
 # %%
 import numpy as np
+import math
 
 import torch
 import torch.nn as nn
@@ -18,9 +19,10 @@ import os
 USE_CUDA = True
 global_step_train = 0
 n_epochs = 30
-batch_size = 100
-summary_prefix = 'test_weight_decay_0.0001'
+batch_size = 64
+summary_prefix = 'test_leaky_with_bias'
 summary_dir = 'runs/{0}'.format(summary_prefix + datetime.now().strftime("%b %d %Y %H:%M:%S"))
+use_leaky_routing = True
 
 # %%
 class Mnist:
@@ -63,7 +65,7 @@ class PrimaryCaps(nn.Module):
         super(PrimaryCaps, self).__init__()
 
         self.capsules = nn.ModuleList([
-            nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=2, padding=0) 
+            nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=2, padding=4) 
                           for _ in range(num_capsules)])
     
     def forward(self, x):
@@ -72,7 +74,7 @@ class PrimaryCaps(nn.Module):
 
         u = [capsule(x) for capsule in self.capsules]
         u = torch.stack(u, dim=4)
-        u = u.view(x.size(0), -1, 64 * 8 * 8)
+        u = u.view(x.size(0), -1, 64 * 12 * 12)
         u = torch.transpose(u, 1, 2)
         return self.squash(u)
     
@@ -86,7 +88,7 @@ class PrimaryCaps(nn.Module):
 
 # %%
 class DigitCaps(nn.Module):
-    def __init__(self, num_capsules=10, num_routes=64 * 8 * 8, in_channels=8, out_channels=16):
+    def __init__(self, num_capsules=10, num_routes=64 * 12 * 12, in_channels=8, out_channels=16):
         super(DigitCaps, self).__init__()
 
         self.in_channels = in_channels
@@ -94,9 +96,11 @@ class DigitCaps(nn.Module):
         self.num_capsules = num_capsules
 
         self.W = nn.Parameter(torch.randn(1, num_routes, num_capsules, out_channels, in_channels))
+        self.bias = nn.Parameter(torch.randn(num_capsules, out_channels))
 
     def forward(self, x):
         self.writer.add_histogram('dight_caps/W', self.W, global_step_train)
+        self.writer.add_histogram('dight_caps/bias', self.bias, global_step_train)
 
         batch_size = x.size(0)
         x = torch.stack([x] * self.num_capsules, dim=2).unsqueeze(4)
@@ -111,7 +115,10 @@ class DigitCaps(nn.Module):
 
         num_iterations = 3
         for iteration in range(num_iterations):
-            c_ij = F.softmax(b_ij).unsqueeze(4)
+            if use_leaky_routing:
+                c_ij = self.leaky_softmax(b_ij).unsqueeze(4)
+            else:
+                c_ij = F.softmax(b_ij).unsqueeze(4)
             #c_ij = torch.cat([c_ij] * batch_size, dim=0).unsqueeze(4)
 
             s_j = (c_ij * u_hat).sum(dim=1, keepdim=True)
@@ -123,12 +130,20 @@ class DigitCaps(nn.Module):
         
         self.writer.add_histogram('dight_caps/b_ij', b_ij, global_step_train)
         
-        return v_j.squeeze(1)
+        return v_j.squeeze(1) + torch.stack([self.bias] * batch_size, dim=0).unsqueeze(3)
     
     def squash(self, input_tensor):
         squared_norm = (input_tensor ** 2).sum(-2, keepdim=True)
         output_tensor = squared_norm *  input_tensor / ((1. + squared_norm) * torch.sqrt(squared_norm))
         return output_tensor
+    
+    def leaky_softmax(self, logits):
+        leak = torch.zeros_like(logits)
+        leak = torch.sum(leak, dim=2, keepdim=True)
+        leaky_logits = torch.cat([leak, logits], axis=2)
+        leaky_routing = F.softmax(leaky_logits, dim=2)
+        return leaky_routing[:,:,1:,:]
+
     def add_writer(self, writer):
         self.writer = writer
 
@@ -220,8 +235,17 @@ class Writer():
 capsule_net = CapsNet()
 if USE_CUDA:
     capsule_net = capsule_net.cuda()
-optimizer = Adam(capsule_net.parameters(), weight_decay=0.0001)
+optimizer = Adam(capsule_net.parameters())
 
+def load_model(saved_model_path):
+    checkpoint = torch.load(saved_model_path)
+    capsule_net.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+    global global_step_train
+    global summary_dir
+    global_step_train = checkpoint['global_step_train']
+    summary_dir = checkpoint['summary_dir']
 
 # %%
 mnist = Mnist(batch_size)
@@ -286,11 +310,8 @@ for epoch in range(n_epochs):
     print ('test accuracy: ', correct_predictions / total_predictions, 'correct: ', correct_predictions, 'total: ', total_predictions)
     print ("test loss: ", test_loss / len(mnist.test_loader))
     
-    writer.add_scalar('test/accuracy', correct_predictions / total_predictions, global_step_train)
-    writer.add_scalar('test/loss', test_loss / len(mnist.test_loader), global_step_train)
-    
-print('Saving model to ', summary_dir)
-torch.save(capsule_net.state_dict(), os.path.join(summary_dir, 'saved_model'))
+    writer.add_scalar_force('test/accuracy', correct_predictions / total_predictions, global_step_train)
+    writer.add_scalar_force('test/loss', test_loss / len(mnist.test_loader), global_step_train)
 
 writer.close()
 
