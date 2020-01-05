@@ -20,9 +20,9 @@ USE_CUDA = True
 global_step_train = 0
 n_epochs = 30
 batch_size = 64
-summary_prefix = 'test_leaky_with_bias'
+summary_prefix = 'test_bias '
 summary_dir = 'runs/{0}'.format(summary_prefix + datetime.now().strftime("%b %d %Y %H:%M:%S"))
-use_leaky_routing = True
+use_leaky_routing = False
 
 # %%
 class Mnist:
@@ -96,7 +96,7 @@ class DigitCaps(nn.Module):
         self.num_capsules = num_capsules
 
         self.W = nn.Parameter(torch.randn(1, num_routes, num_capsules, out_channels, in_channels))
-        self.bias = nn.Parameter(torch.randn(num_capsules, out_channels))
+        self.bias = nn.Parameter(torch.empty(num_capsules, out_channels).normal_(mean=0, std=0.001))
 
     def forward(self, x):
         self.writer.add_histogram('dight_caps/W', self.W, global_step_train)
@@ -122,6 +122,7 @@ class DigitCaps(nn.Module):
             #c_ij = torch.cat([c_ij] * batch_size, dim=0).unsqueeze(4)
 
             s_j = (c_ij * u_hat).sum(dim=1, keepdim=True)
+            s_j = s_j + torch.stack([self.bias] * batch_size, dim=0).unsqueeze(1).unsqueeze(4)
             v_j = self.squash(s_j)
             
             if iteration < num_iterations - 1:
@@ -130,7 +131,7 @@ class DigitCaps(nn.Module):
         
         self.writer.add_histogram('dight_caps/b_ij', b_ij, global_step_train)
         
-        return v_j.squeeze(1) + torch.stack([self.bias] * batch_size, dim=0).unsqueeze(3)
+        return v_j.squeeze(1)
     
     def squash(self, input_tensor):
         squared_norm = (input_tensor ** 2).sum(-2, keepdim=True)
@@ -249,6 +250,7 @@ def load_model(saved_model_path):
 
 # %%
 mnist = Mnist(batch_size)
+#load_model('/home/donglin/Capsule-Network-Tutorial/runs/test_bias Jan 05 2020 04:50:29/saved_model')
 writer = Writer(SummaryWriter(summary_dir))
 capsule_net.add_writer(writer)
 
