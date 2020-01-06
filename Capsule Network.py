@@ -20,9 +20,15 @@ USE_CUDA = True
 global_step_train = 0
 n_epochs = 30
 batch_size = 64
-summary_prefix = 'test_bias '
+summary_prefix = 'test_leaky_bias_softmax_dim=2 smallW'
 summary_dir = 'runs/{0}'.format(summary_prefix + datetime.now().strftime("%b %d %Y %H:%M:%S"))
-use_leaky_routing = False
+use_leaky_routing = True
+
+def summary_variables(writer, tag, variable):
+    writer.add_scalar(tag, variable.max(), global_step_train)
+    writer.add_scalar(tag, variable.min(), global_step_train)
+    writer.add_scalar(tag, variable.mean(), global_step_train)
+    writer.add_histogram(tag, variable, global_step_train)
 
 # %%
 class Mnist:
@@ -51,8 +57,8 @@ class ConvLayer(nn.Module):
                              )
 
     def forward(self, x):
-        self.writer.add_histogram('conv1/weight', self.conv.weight, global_step_train)
-        self.writer.add_histogram('conv1/bias', self.conv.bias, global_step_train)
+        summary_variables(self.writer, 'conv1/weight', self.conv.weight)
+        summary_variables(self.writer, 'conv1/bias', self.conv.bias)
 
         return F.relu(self.conv(x))
     def add_writer(self, writer):
@@ -69,8 +75,8 @@ class PrimaryCaps(nn.Module):
                           for _ in range(num_capsules)])
     
     def forward(self, x):
-        self.writer.add_histogram('conv2/weight', torch.stack([capsule.weight for capsule in self.capsules]), global_step_train)
-        self.writer.add_histogram('conv2/bias', torch.stack([capsule.bias for capsule in self.capsules]), global_step_train)
+        summary_variables(self.writer, 'conv2/weight', torch.stack([capsule.weight for capsule in self.capsules]))
+        summary_variables(self.writer, 'conv2/bias', torch.stack([capsule.bias for capsule in self.capsules]))
 
         u = [capsule(x) for capsule in self.capsules]
         u = torch.stack(u, dim=4)
@@ -95,12 +101,12 @@ class DigitCaps(nn.Module):
         self.num_routes = num_routes
         self.num_capsules = num_capsules
 
-        self.W = nn.Parameter(torch.randn(1, num_routes, num_capsules, out_channels, in_channels))
+        self.W = nn.Parameter(torch.empty(1, num_routes, num_capsules, out_channels, in_channels).normal_(mean=0, std=0.01))
         self.bias = nn.Parameter(torch.empty(num_capsules, out_channels).normal_(mean=0, std=0.01))
 
     def forward(self, x):
-        self.writer.add_histogram('dight_caps/W', self.W, global_step_train)
-        self.writer.add_histogram('dight_caps/bias', self.bias, global_step_train)
+        summary_variables(self.writer, 'dight_caps/W', self.W)
+        summary_variables(self.writer, 'dight_caps/bias', self.bias)
 
         batch_size = x.size(0)
         x = torch.stack([x] * self.num_capsules, dim=2).unsqueeze(4)
@@ -118,7 +124,7 @@ class DigitCaps(nn.Module):
             if use_leaky_routing:
                 c_ij = self.leaky_softmax(b_ij).unsqueeze(4)
             else:
-                c_ij = F.softmax(b_ij).unsqueeze(4)
+                c_ij = F.softmax(b_ij, dim=2).unsqueeze(4)
             #c_ij = torch.cat([c_ij] * batch_size, dim=0).unsqueeze(4)
 
             s_j = (c_ij * u_hat).sum(dim=1, keepdim=True)
@@ -129,7 +135,8 @@ class DigitCaps(nn.Module):
                 a_ij = torch.matmul(u_hat.transpose(3, 4), torch.cat([v_j] * self.num_routes, dim=1))
                 b_ij = b_ij + a_ij.squeeze(4)
         
-        self.writer.add_histogram('dight_caps/b_ij', b_ij, global_step_train)
+        summary_variables(self.writer, 'dight_caps/b_ij', b_ij)
+        summary_variables(self.writer, 'dight_caps/c_ij', c_ij)
         
         return v_j.squeeze(1)
     
