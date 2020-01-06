@@ -96,7 +96,7 @@ class DigitCaps(nn.Module):
         self.num_capsules = num_capsules
 
         self.W = nn.Parameter(torch.randn(1, num_routes, num_capsules, out_channels, in_channels))
-        self.bias = nn.Parameter(torch.empty(num_capsules, out_channels).normal_(mean=0, std=0.001))
+        self.bias = nn.Parameter(torch.empty(num_capsules, out_channels).normal_(mean=0, std=0.01))
 
     def forward(self, x):
         self.writer.add_histogram('dight_caps/W', self.W, global_step_train)
