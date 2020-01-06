@@ -25,9 +25,9 @@ summary_dir = 'runs/{0}'.format(summary_prefix + datetime.now().strftime("%b %d 
 use_leaky_routing = True
 
 def summary_variables(writer, tag, variable):
-    writer.add_scalar(tag, variable.max(), global_step_train)
-    writer.add_scalar(tag, variable.min(), global_step_train)
-    writer.add_scalar(tag, variable.mean(), global_step_train)
+    writer.add_scalar(tag+'/max', variable.max(), global_step_train)
+    writer.add_scalar(tag+'/min', variable.min(), global_step_train)
+    writer.add_scalar(tag+'/mean', variable.mean(), global_step_train)
     writer.add_histogram(tag, variable, global_step_train)
 
 # %%
