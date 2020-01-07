@@ -12,6 +12,7 @@ from torch.autograd import Variable
 from torch.optim import Adam
 from torchvision import datasets, transforms
 from torch.utils.tensorboard import SummaryWriter
+from torch.optim.lr_scheduler import StepLR
 from datetime import datetime
 import torchvision.models as models
 import os
@@ -20,7 +21,7 @@ USE_CUDA = True
 global_step_train = 0
 n_epochs = 30
 batch_size = 64
-summary_prefix = 'test_leaky_bias_softmax_dim=2 smallW'
+summary_prefix = 'test_leaky_bias_softmaxdim=2SmallW_Decay'
 summary_dir = 'runs/{0}'.format(summary_prefix + datetime.now().strftime("%b %d %Y %H:%M:%S"))
 use_leaky_routing = True
 
@@ -100,6 +101,7 @@ class DigitCaps(nn.Module):
         self.in_channels = in_channels
         self.num_routes = num_routes
         self.num_capsules = num_capsules
+        self.out_channels = out_channels
 
         self.W = nn.Parameter(torch.empty(1, num_routes, num_capsules, out_channels, in_channels).normal_(mean=0, std=0.01))
         self.bias = nn.Parameter(torch.empty(num_capsules, out_channels).normal_(mean=0, std=0.01))
@@ -109,11 +111,12 @@ class DigitCaps(nn.Module):
         summary_variables(self.writer, 'dight_caps/bias', self.bias)
 
         batch_size = x.size(0)
-        x = torch.stack([x] * self.num_capsules, dim=2).unsqueeze(4)
+        x = torch.stack([x] * self.num_capsules, dim=2)
+        x = torch.stack([x] * self.out_channels, dim=3)
 
         W = torch.cat([self.W] * batch_size, dim=0)
         
-        u_hat = torch.matmul(W, x)
+        u_hat = (W * x).sum(dim=-1, keepdim=True)
 
         b_ij = Variable(torch.zeros(batch_size, self.num_routes, self.num_capsules, 1))
         if USE_CUDA:
@@ -243,7 +246,9 @@ class Writer():
 capsule_net = CapsNet()
 if USE_CUDA:
     capsule_net = capsule_net.cuda()
-optimizer = Adam(capsule_net.parameters())
+optimizer = Adam(capsule_net.parameters(), weight_decay=1e-7)
+scheduler = StepLR(optimizer, step_size=2000, gamma=0.80)
+
 
 def load_model(saved_model_path):
     checkpoint = torch.load(saved_model_path)
@@ -278,7 +283,8 @@ for epoch in range(n_epochs):
         loss = capsule_net.loss(data, output, target)
         loss.backward()
         optimizer.step()
-        
+        scheduler.step()
+
         train_loss += loss.data.item()
         
         train_accuracy = sum(np.argmax(masked.data.cpu().numpy(), 1) == 
