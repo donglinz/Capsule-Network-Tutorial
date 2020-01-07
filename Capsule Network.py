@@ -111,8 +111,7 @@ class DigitCaps(nn.Module):
         summary_variables(self.writer, 'dight_caps/bias', self.bias)
 
         batch_size = x.size(0)
-        x = torch.stack([x] * self.num_capsules, dim=2)
-        x = torch.stack([x] * self.out_channels, dim=3)
+        x = x.unsqueeze(2).unsqueeze(3)
 
         W = torch.cat([self.W] * batch_size, dim=0)
         
