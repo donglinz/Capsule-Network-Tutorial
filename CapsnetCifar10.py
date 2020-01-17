@@ -20,8 +20,8 @@ import os
 USE_CUDA = True
 global_step_train = 0
 n_epochs = 30
-batch_size = 64
-summary_prefix = 'test_leaky_bias_softmaxdim=2SmallW_Decay'
+batch_size = 100
+summary_prefix = 'cifar10'
 summary_dir = 'runs/{0}'.format(summary_prefix + datetime.now().strftime("%b %d %Y %H:%M:%S"))
 use_leaky_routing = True
 
@@ -245,8 +245,8 @@ class Writer():
 capsule_net = CapsNet()
 if USE_CUDA:
     capsule_net = capsule_net.cuda()
-optimizer = Adam(capsule_net.parameters(), weight_decay=1e-7)
-scheduler = StepLR(optimizer, step_size=2000, gamma=0.80)
+optimizer = Adam(capsule_net.parameters(), weight_decay=1e-5)
+scheduler = StepLR(optimizer, step_size=2000, gamma=0.50)
 
 
 def load_model(saved_model_path):
