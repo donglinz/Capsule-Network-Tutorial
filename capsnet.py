@@ -16,14 +16,14 @@ from torch.optim.lr_scheduler import StepLR
 from datetime import datetime
 import torchvision.models as models
 import os
+import args_parser
+# TODO pass parameters into each network
+# TODO reconstruction layer
+args = args_parser.get_args()
 
-USE_CUDA = True
-global_step_train = 0
-n_epochs = 30
-batch_size = 100
-summary_prefix = 'cifar10'
+summary_prefix = '{0}_{1}'.format(args.action, args.dataset)
 summary_dir = 'runs/{0}'.format(summary_prefix + datetime.now().strftime("%b %d %Y %H:%M:%S"))
-use_leaky_routing = True
+global_step_train = 0
 
 def summary_variables(writer, tag, variable):
     writer.add_scalar(tag+'/max', variable.max(), global_step_train)
@@ -31,31 +31,33 @@ def summary_variables(writer, tag, variable):
     writer.add_scalar(tag+'/mean', variable.mean(), global_step_train)
     writer.add_histogram(tag, variable, global_step_train)
 
-# %%
-class Mnist:
-    def __init__(self, batch_size):
+class DataLoader:
+    def __init__(self):
         dataset_transform = transforms.Compose([
                        transforms.ToTensor(),
                        transforms.Normalize((0.1307,), (0.3081,))
                    ])
-
-        train_dataset = datasets.CIFAR10('./data', train=True, download=True, transform=dataset_transform)
-        test_dataset = datasets.CIFAR10('./data', train=False, download=True, transform=dataset_transform)
         
-        self.train_loader  = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=True)        
+        if args.dataset == 'mnist':
+            train_dataset = datasets.MNIST('./data', train=True, download=True, transform=dataset_transform)
+            test_dataset = datasets.MNIST('./data', train=False, download=True, transform=dataset_transform)
+        elif args.dataset == 'cifar10':
+            train_dataset = datasets.CIFAR10('./data', train=True, download=True, transform=dataset_transform)
+            test_dataset = datasets.CIFAR10('./data', train=False, download=True, transform=dataset_transform)
+        
+        self.train_loader  = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+        self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True)        
 
-
-# %%
 class ConvLayer(nn.Module):
     def __init__(self, in_channels=3, out_channels=256, kernel_size=9):
         super(ConvLayer, self).__init__()
-
+        
         self.conv = nn.Conv2d(in_channels=in_channels,
                                out_channels=out_channels,
                                kernel_size=kernel_size,
                                stride=1
                              )
+                        
 
     def forward(self, x):
         summary_variables(self.writer, 'conv1/weight', self.conv.weight)
@@ -65,14 +67,12 @@ class ConvLayer(nn.Module):
     def add_writer(self, writer):
         self.writer = writer
 
-
-# %%
 class PrimaryCaps(nn.Module):
     def __init__(self, num_capsules=64, in_channels=256, out_channels=8, kernel_size=9):
         super(PrimaryCaps, self).__init__()
-
+        self.num_capsules = num_capsules
         self.capsules = nn.ModuleList([
-            nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=2, padding=4) 
+            nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=2) 
                           for _ in range(num_capsules)])
     
     def forward(self, x):
@@ -80,8 +80,9 @@ class PrimaryCaps(nn.Module):
         summary_variables(self.writer, 'conv2/bias', torch.stack([capsule.bias for capsule in self.capsules]))
 
         u = [capsule(x) for capsule in self.capsules]
+        width = u[0].shape[-1]
         u = torch.stack(u, dim=4)
-        u = u.view(x.size(0), -1, 64 * 12 * 12)
+        u = u.view(x.size(0), -1, self.num_capsules * width * width)
         u = torch.transpose(u, 1, 2)
         return self.squash(u)
     
@@ -92,10 +93,8 @@ class PrimaryCaps(nn.Module):
     def add_writer(self, writer):
         self.writer = writer
 
-
-# %%
 class DigitCaps(nn.Module):
-    def __init__(self, num_capsules=10, num_routes=64 * 12 * 12, in_channels=8, out_channels=16):
+    def __init__(self, num_capsules=10, num_routes=64 * 8 * 8, in_channels=8, out_channels=16):
         super(DigitCaps, self).__init__()
 
         self.in_channels = in_channels
@@ -118,16 +117,15 @@ class DigitCaps(nn.Module):
         u_hat = (W * x).sum(dim=-1, keepdim=True)
 
         b_ij = Variable(torch.zeros(batch_size, self.num_routes, self.num_capsules, 1))
-        if USE_CUDA:
+        if args.use_cuda:
             b_ij = b_ij.cuda()
 
         num_iterations = 3
         for iteration in range(num_iterations):
-            if use_leaky_routing:
+            if args.leaky_routing:
                 c_ij = self.leaky_softmax(b_ij).unsqueeze(4)
             else:
                 c_ij = F.softmax(b_ij, dim=2).unsqueeze(4)
-            #c_ij = torch.cat([c_ij] * batch_size, dim=0).unsqueeze(4)
 
             s_j = (c_ij * u_hat).sum(dim=1, keepdim=True)
             s_j = s_j + torch.stack([self.bias] * batch_size, dim=0).unsqueeze(1).unsqueeze(4)
@@ -157,8 +155,6 @@ class DigitCaps(nn.Module):
     def add_writer(self, writer):
         self.writer = writer
 
-
-# %%
 class Decoder(nn.Module):
     def __init__(self):
         super(Decoder, self).__init__()
@@ -178,20 +174,18 @@ class Decoder(nn.Module):
         
         _, max_length_indices = classes.max(dim=1)
         masked = Variable(torch.sparse.torch.eye(10))
-        if USE_CUDA:
+        if args.use_cuda:
             masked = masked.cuda()
         masked = masked.index_select(dim=0, index=max_length_indices.squeeze(1).data)
         
         return masked
 
-
-# %%
 class CapsNet(nn.Module):
     def __init__(self):
         super(CapsNet, self).__init__()
-        self.conv_layer = ConvLayer()
-        self.primary_capsules = PrimaryCaps()
-        self.digit_capsules = DigitCaps()
+        self.conv_layer = ConvLayer(in_channels = 1 if args.dataset == 'mnist' else 3)
+        self.primary_capsules = PrimaryCaps(num_capsules = args.num_capsules)
+        self.digit_capsules = DigitCaps(num_routes = 32 * 6 * 6 if args.dataset == 'mnist' else 64 * 8 * 8)
         self.decoder = Decoder()
         
         self.mse_loss = nn.MSELoss()
@@ -222,8 +216,6 @@ class CapsNet(nn.Module):
         self.conv_layer.add_writer(writer)
         self.primary_capsules.add_writer(writer)
 
-
-# %%
 class Writer():
     def __init__(self, writer):
         self.writer = writer
@@ -240,92 +232,128 @@ class Writer():
     def flush(self):
         self.writer.flush()
 
-
-# %%
 capsule_net = CapsNet()
-if USE_CUDA:
+if args.use_cuda:
     capsule_net = capsule_net.cuda()
 optimizer = Adam(capsule_net.parameters(), weight_decay=1e-5)
 scheduler = StepLR(optimizer, step_size=2000, gamma=0.50)
 
-
-def load_model(saved_model_path):
+def load_model_ckpt(saved_model_path):
     checkpoint = torch.load(saved_model_path)
-    capsule_net.load_state_dict(checkpoint['model_state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    return checkpoint
+    # capsule_net.load_state_dict(checkpoint['model_state_dict'])
+    # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-    global global_step_train
-    global summary_dir
-    global_step_train = checkpoint['global_step_train']
-    summary_dir = checkpoint['summary_dir']
+def train_step(model, optimizer, scheduler, data, target):
+    optimizer.zero_grad()
+    output, masked = capsule_net(data)
+    loss = capsule_net.loss(data, output, target)
+    loss.backward()
+    optimizer.step()
+    scheduler.step()
 
-# %%
-mnist = Mnist(batch_size)
+    train_loss = loss.data.item()
+    train_accuracy = sum(np.argmax(masked.data.cpu().numpy(), 1) == 
+                                np.argmax(target.data.cpu().numpy(), 1)) / data.shape[0]
+    writer.add_scalar('train/accuracy', train_accuracy, global_step_train)
+    writer.add_scalar('train/loss', train_loss, global_step_train)
+    return train_loss, train_accuracy
+
+def eval_step(model, writer, data, target):
+    output, masked = model(data)
+    loss = model.loss(data, output, target)
+
+    loss = loss.data.item()
+    correct = sum(np.argmax(masked.data.cpu().numpy(), 1) == np.argmax(target.data.cpu().numpy(), 1))
+    total = data.shape[0]
+
+    return loss, correct, total
+
+dataset = DataLoader()
 #load_model('/home/donglin/Capsule-Network-Tutorial/runs/test_bias Jan 05 2020 04:50:29/saved_model')
 writer = Writer(SummaryWriter(summary_dir))
 capsule_net.add_writer(writer)
 
-for epoch in range(n_epochs):
-    capsule_net.train()
-    train_loss = 0
-    print('--------------- epoch ', epoch, '---------------')
-    for batch_id, (data, target) in enumerate(mnist.train_loader):
-        target = torch.sparse.torch.eye(10).index_select(dim=0, index=target)
-        data, target = Variable(data), Variable(target)
-        global_step_train += 1
+def train_experiment():
+    global global_step_train
+    for epoch in range(args.epoch):
+        capsule_net.train()
+        total_train_loss = 0
+        print('--------------- epoch ', epoch, '---------------')
+        for batch_id, (data, target) in enumerate(dataset.train_loader):
+            target = torch.sparse.torch.eye(10).index_select(dim=0, index=target)
+            data, target = Variable(data), Variable(target)
+            global_step_train += 1
+                
+            if args.use_cuda:
+                data, target = data.cuda(), target.cuda()
             
-        if USE_CUDA:
-            data, target = data.cuda(), target.cuda()
+            loss, train_accuracy = train_step(capsule_net, optimizer, scheduler, data, target)
+            total_train_loss += loss
+            
+            if batch_id % args.save_step == 0:
+                torch.save({
+                    'model_state_dict': capsule_net.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict()
+                }, os.path.join(summary_dir, 'saved_model'))
+            
+        print ("train loss: ", total_train_loss / len(dataset.train_loader))
         
-        optimizer.zero_grad()
-        output, masked = capsule_net(data)
-        loss = capsule_net.loss(data, output, target)
-        loss.backward()
-        optimizer.step()
-        scheduler.step()
+        capsule_net.eval()
+        test_loss = 0
+        correct_predictions = 0.0
+        total_predictions = 0.0
+        for batch_id, (data, target) in enumerate(dataset.test_loader):
+            target = torch.sparse.torch.eye(10).index_select(dim=0, index=target)
+            data, target = Variable(data), Variable(target)
 
-        train_loss += loss.data.item()
+            if args.use_cuda:
+                data, target = data.cuda(), target.cuda()
+
+            loss, correct, total = eval_step(capsule_net, writer, data, target)
+
+            test_loss += loss
+            correct_predictions += correct
+            total_predictions += total
         
-        train_accuracy = sum(np.argmax(masked.data.cpu().numpy(), 1) == 
-                                   np.argmax(target.data.cpu().numpy(), 1)) / data.shape[0]
-
-        writer.add_scalar('train/accuracy', train_accuracy, global_step_train)
-        writer.add_scalar('train/loss', loss.data.item(), global_step_train)
-
-        if batch_id % 100 == 0:
-            print ("train accuracy:", train_accuracy)
-            torch.save({
-                'model_state_dict': capsule_net.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'global_step_train': global_step_train,
-                'summary_dir': summary_dir
-            }, os.path.join(summary_dir, 'saved_model'))
+        print ('test accuracy: ', correct_predictions / total_predictions, 'correct: ', correct_predictions, 'total: ', total_predictions)
+        print ("test loss: ", test_loss / len(dataset.test_loader))
         
-    print ("train loss: ", train_loss / len(mnist.train_loader))
-    
+        writer.add_scalar_force('test/accuracy', correct_predictions / total_predictions, global_step_train)
+        writer.add_scalar_force('test/loss', test_loss / len(dataset.test_loader), global_step_train)
+
+def eval_experiment():
+    ckpt = load_model_ckpt(args.saved_model)
+    capsule_net.load_state_dict(ckpt['model_state_dict'])
+
     capsule_net.eval()
     test_loss = 0
     correct_predictions = 0.0
     total_predictions = 0.0
-    for batch_id, (data, target) in enumerate(mnist.test_loader):
+    for batch_id, (data, target) in enumerate(dataset.test_loader):
         target = torch.sparse.torch.eye(10).index_select(dim=0, index=target)
         data, target = Variable(data), Variable(target)
 
         if USE_CUDA:
             data, target = data.cuda(), target.cuda()
 
-        output, masked = capsule_net(data)
-        loss = capsule_net.loss(data, output, target)
+        loss, correct, total = eval_step(capsule_net, writer, data, target)
 
-        test_loss += loss.data.item()
-        correct_predictions += sum(np.argmax(masked.data.cpu().numpy(), 1) == np.argmax(target.data.cpu().numpy(), 1))
-        total_predictions += data.shape[0]
+        test_loss += loss
+        correct_predictions += correct
+        total_predictions += total
     
     print ('test accuracy: ', correct_predictions / total_predictions, 'correct: ', correct_predictions, 'total: ', total_predictions)
-    print ("test loss: ", test_loss / len(mnist.test_loader))
+    print ("test loss: ", test_loss / len(dataset.test_loader))
     
     writer.add_scalar_force('test/accuracy', correct_predictions / total_predictions, global_step_train)
-    writer.add_scalar_force('test/loss', test_loss / len(mnist.test_loader), global_step_train)
+    writer.add_scalar_force('test/loss', test_loss / len(dataset.test_loader), global_step_train)
+
+if args.action == 'train':
+    train_experiment()
+
+if args.action == 'eval':
+    eval_experiment()
 
 writer.close()
 
