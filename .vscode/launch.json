@@ -16,7 +16,21 @@
                 "--action", "train",
                 "--epoch", "30",
                 "--batch_size", "500",
-                "--save_step", "50"]
+                "--save_step", "50",
+                "--use_cuda"]
+        },
+        {
+            "name": "mnist eval",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset", "mnist",
+                "--num_capsules", "32",
+                "--action", "eval",
+                "--batch_size", "200",
+                "--saved_model", "/home/ubuntu/train_mnist/saved_model"]
         }
     ]
 }

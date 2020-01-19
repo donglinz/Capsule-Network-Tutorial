@@ -239,7 +239,10 @@ optimizer = Adam(capsule_net.parameters(), weight_decay=1e-5)
 scheduler = StepLR(optimizer, step_size=2000, gamma=0.50)
 
 def load_model_ckpt(saved_model_path):
-    checkpoint = torch.load(saved_model_path)
+    if args.use_cuda:
+        checkpoint = torch.load(saved_model_path)
+    else:
+        checkpoint = torch.load(saved_model_path, map_location=torch.device('cpu'))
     return checkpoint
     # capsule_net.load_state_dict(checkpoint['model_state_dict'])
     # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -334,7 +337,7 @@ def eval_experiment():
         target = torch.sparse.torch.eye(10).index_select(dim=0, index=target)
         data, target = Variable(data), Variable(target)
 
-        if USE_CUDA:
+        if args.use_cuda:
             data, target = data.cuda(), target.cuda()
 
         loss, correct, total = eval_step(capsule_net, writer, data, target)
