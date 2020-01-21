@@ -2,7 +2,7 @@ import argparse
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', choices=['mnist', 'cifar10'])
+    parser.add_argument('--dataset', choices=['mnist', 'cifar10', 'f-mnist'])
     parser.add_argument('--num_capsules', type=int)
     parser.add_argument('--leaky_routing', action='store_true')
     parser.add_argument('--action', choices=['train', 'eval'])

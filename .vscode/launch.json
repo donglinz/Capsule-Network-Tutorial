@@ -33,6 +33,37 @@
                 "--saved_model", "/mnt/c/Users/39218/Desktop/summary/train_mnist/saved_model",
                 "--profile_eval_by_category",
                 "--profile_category", "8"]
-        }
+        },
+        {
+            "name": "f-mnist training",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset", "f-mnist",
+                "--num_capsules", "32",
+                "--action", "train",
+                "--epoch", "30",
+                "--batch_size", "500",
+                "--save_step", "50",
+                "--use_cuda"]
+        },
+        {
+            "name": "cifar10 training",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset", "cifar10",
+                "--num_capsules", "64",
+                "--action", "train",
+                "--epoch", "200",
+                "--batch_size", "80",
+                "--save_step", "100",
+                "--leaky_routing",
+                "--use_cuda"]
+        },
     ]
 }

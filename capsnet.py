@@ -44,6 +44,9 @@ class DataLoader:
         elif args.dataset == 'cifar10':
             train_dataset = datasets.CIFAR10('./data', train=True, download=True, transform=dataset_transform)
             test_dataset = datasets.CIFAR10('./data', train=False, download=True, transform=dataset_transform)
+        elif args.dataset == 'f-mnist':
+            train_dataset = datasets.FashionMNIST('./data', train=True, download=True, transform=dataset_transform)
+            test_dataset = datasets.FashionMNIST('./data', train=False, download=True, transform=dataset_transform)
         
         self.train_loader  = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
         self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True)        
@@ -212,9 +215,9 @@ class Decoder(nn.Module):
 class CapsNet(nn.Module):
     def __init__(self):
         super(CapsNet, self).__init__()
-        self.conv_layer = ConvLayer(in_channels = 1 if args.dataset == 'mnist' else 3)
+        self.conv_layer = ConvLayer(in_channels = 1 if args.dataset == 'mnist' or args.dataset == 'f-mnist' else 3)
         self.primary_capsules = PrimaryCaps(num_capsules = args.num_capsules)
-        self.digit_capsules = DigitCaps(num_routes = 32 * 6 * 6 if args.dataset == 'mnist' else 64 * 8 * 8)
+        self.digit_capsules = DigitCaps(num_routes = 32 * 6 * 6 if args.dataset == 'mnist' or args.dataset == 'f-mnist' else 64 * 8 * 8)
         self.decoder = Decoder()
         
         self.mse_loss = nn.MSELoss()
