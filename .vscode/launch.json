@@ -29,8 +29,10 @@
                 "--dataset", "mnist",
                 "--num_capsules", "32",
                 "--action", "eval",
-                "--batch_size", "200",
-                "--saved_model", "/home/ubuntu/train_mnist/saved_model"]
+                "--batch_size", "1",
+                "--saved_model", "/mnt/c/Users/39218/Desktop/summary/train_mnist/saved_model",
+                "--profile_eval_by_category",
+                "--profile_category", "8"]
         }
     ]
 }

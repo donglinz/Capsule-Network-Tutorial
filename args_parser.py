@@ -11,4 +11,6 @@ def get_args():
     parser.add_argument('--epoch', type=int, default=30)
     parser.add_argument('--save_step', type=int, default=1000)
     parser.add_argument('--saved_model')
+    parser.add_argument('--profile_eval_by_category', action='store_true')
+    parser.add_argument('--profile_category', type=int)
     return parser.parse_args()

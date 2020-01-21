@@ -21,7 +21,7 @@ import args_parser
 # TODO reconstruction layer
 args = args_parser.get_args()
 
-summary_prefix = '{0}_{1}'.format(args.action, args.dataset)
+summary_prefix = '{0}_{1}{2} '.format(args.action, args.dataset, args.profile_category)
 summary_dir = 'runs/{0}'.format(summary_prefix + datetime.now().strftime("%b %d %Y %H:%M:%S"))
 global_step_train = 0
 
@@ -63,7 +63,11 @@ class ConvLayer(nn.Module):
         summary_variables(self.writer, 'conv1/weight', self.conv.weight)
         summary_variables(self.writer, 'conv1/bias', self.conv.bias)
 
-        return F.relu(self.conv(x))
+        result = F.relu(self.conv(x))
+        if args.profile_eval_by_category:
+            images = result.transpose(0, 1)
+            self.writer.add_images('conv1/channels', images, global_step_train)
+        return result
     def add_writer(self, writer):
         self.writer = writer
 
@@ -82,6 +86,11 @@ class PrimaryCaps(nn.Module):
         u = [capsule(x) for capsule in self.capsules]
         width = u[0].shape[-1]
         u = torch.stack(u, dim=4)
+
+        if args.profile_eval_by_category:
+            self.writer.add_images('conv2/output_avg', self.get_images_avg(u), global_step_train)
+            self.writer.add_images('conv2/output', self.get_images(u), global_step_train)
+        
         u = u.view(x.size(0), -1, self.num_capsules * width * width)
         u = torch.transpose(u, 1, 2)
         return self.squash(u)
@@ -92,6 +101,12 @@ class PrimaryCaps(nn.Module):
         return output_tensor
     def add_writer(self, writer):
         self.writer = writer
+
+    def get_images_avg(self, u):
+        return u.mean(dim=1).permute(3, 0, 1, 2)
+    
+    def get_images(self, u):
+        return u.permute(0,2,3,4,1).reshape(1,6,6,-1).permute(3,0,1,2)
 
 class DigitCaps(nn.Module):
     def __init__(self, num_capsules=10, num_routes=64 * 8 * 8, in_channels=8, out_channels=16):
@@ -137,7 +152,13 @@ class DigitCaps(nn.Module):
         
         summary_variables(self.writer, 'dight_caps/b_ij', b_ij)
         summary_variables(self.writer, 'dight_caps/c_ij', c_ij)
-        
+
+        if args.profile_eval_by_category:
+            self.writer.add_images('dight_caps/c_ij_distribution', c_ij.squeeze(3).squeeze(3).view(1, 96, -1).unsqueeze(0), global_step_train)
+            #self.writer.add_images('dight_caps/c_ij_distribution_raw', c_ij.squeeze(3).squeeze(3).unsqueeze(0), global_step_train)
+            self.plot_cij_by_capsule(c_ij)
+            self.plot_cij_all(c_ij)
+            
         return v_j.squeeze(1)
     
     def squash(self, input_tensor):
@@ -151,7 +172,15 @@ class DigitCaps(nn.Module):
         leaky_logits = torch.cat([leak, logits], axis=2)
         leaky_routing = F.softmax(leaky_logits, dim=2)
         return leaky_routing[:,:,1:,:]
-
+    
+    def plot_cij_by_capsule(self, c_ij):
+        routes = c_ij.reshape(6,6,32,10).mean(dim=0).mean(dim=0)[:,args.profile_category]
+        for i in range(32):
+            self.writer.add_scalar('digit_caps/c_capsule{0}'.format(i), routes[i], global_step_train)
+    def plot_cij_all(self, c_ij):
+        routes = c_ij.reshape(1152, 10)[:,args.profile_category]
+        for i in range(1152):
+            self.writer.add_scalar('digit_caps/c_ij{0}'.format(i), routes[i], global_step_train)
     def add_writer(self, writer):
         self.writer = writer
 
@@ -170,7 +199,7 @@ class Decoder(nn.Module):
         
     def forward(self, x, data):
         classes = torch.sqrt((x ** 2).sum(2))
-        classes = F.softmax(classes)
+        classes = F.softmax(classes, dim=1)
         
         _, max_length_indices = classes.max(dim=1)
         masked = Variable(torch.sparse.torch.eye(10))
@@ -227,6 +256,10 @@ class Writer():
     def add_histogram(self, *args):
         if global_step_train % 10 == 1:
             self.writer.add_histogram(*args)
+    def add_image(self, *args):
+        self.writer.add_image(*args)
+    def add_images(self, *args):
+        self.writer.add_images(*args)
     def close(self):
         self.writer.close()
     def flush(self):
@@ -326,6 +359,7 @@ def train_experiment():
         writer.add_scalar_force('test/loss', test_loss / len(dataset.test_loader), global_step_train)
 
 def eval_experiment():
+    global global_step_train
     ckpt = load_model_ckpt(args.saved_model)
     capsule_net.load_state_dict(ckpt['model_state_dict'])
 
@@ -334,6 +368,11 @@ def eval_experiment():
     correct_predictions = 0.0
     total_predictions = 0.0
     for batch_id, (data, target) in enumerate(dataset.test_loader):
+        if args.profile_eval_by_category and target.item() != args.profile_category:
+            continue
+
+        global_step_train += 1
+
         target = torch.sparse.torch.eye(10).index_select(dim=0, index=target)
         data, target = Variable(data), Variable(target)
 
