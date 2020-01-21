@@ -1,0 +1,69 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "mnist training",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset", "mnist",
+                "--num_capsules", "32",
+                "--action", "train",
+                "--epoch", "30",
+                "--batch_size", "500",
+                "--save_step", "50",
+                "--use_cuda"]
+        },
+        {
+            "name": "mnist eval",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset", "mnist",
+                "--num_capsules", "32",
+                "--action", "eval",
+                "--batch_size", "1",
+                "--saved_model", "/mnt/c/Users/39218/Desktop/summary/train_mnist/saved_model",
+                "--profile_eval_by_category",
+                "--profile_category", "8"]
+        },
+        {
+            "name": "f-mnist training",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset", "f-mnist",
+                "--num_capsules", "32",
+                "--action", "train",
+                "--epoch", "30",
+                "--batch_size", "500",
+                "--save_step", "50",
+                "--use_cuda"]
+        },
+        {
+            "name": "cifar10 training",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset", "cifar10",
+                "--num_capsules", "64",
+                "--action", "train",
+                "--epoch", "200",
+                "--batch_size", "80",
+                "--save_step", "100",
+                "--leaky_routing",
+                "--use_cuda"]
+        },
+    ]
+}
