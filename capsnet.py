@@ -22,7 +22,7 @@ import args_parser
 args = args_parser.get_args()
 
 summary_prefix = '{0}_{1}{2} '.format(args.action, args.dataset, args.profile_category)
-summary_dir = 'runs/{0}'.format(summary_prefix + datetime.now().strftime("%b %d %Y %H:%M:%S"))
+summary_dir = 'runs/{0}/{1}'.format(args.dataset, summary_prefix + datetime.now().strftime("%b %d %Y %H:%M:%S"))
 global_step_train = 0
 
 def summary_variables(writer, tag, variable):
@@ -47,6 +47,9 @@ class DataLoader:
         elif args.dataset == 'f-mnist':
             train_dataset = datasets.FashionMNIST('./data', train=True, download=True, transform=dataset_transform)
             test_dataset = datasets.FashionMNIST('./data', train=False, download=True, transform=dataset_transform)
+        elif args.dataset == 'svhn':
+            train_dataset = datasets.SVHN('./data', split='train', download=True, transform=dataset_transform)
+            test_dataset = datasets.SVHN('./data', split='test', download=True, transform=dataset_transform)
         
         self.train_loader  = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
         self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True)        
@@ -109,7 +112,10 @@ class PrimaryCaps(nn.Module):
         return u.mean(dim=1).permute(3, 0, 1, 2)
     
     def get_images(self, u):
-        return u.permute(0,2,3,4,1).reshape(1,6,6,-1).permute(3,0,1,2)
+        if args.dataset == 'svhn':
+            return u.permute(0,2,3,4,1).reshape(1,8,8,-1).permute(3,0,1,2)
+        else:
+            return u.permute(0,2,3,4,1).reshape(1,6,6,-1).permute(3,0,1,2)
 
 class DigitCaps(nn.Module):
     def __init__(self, num_capsules=10, num_routes=64 * 8 * 8, in_channels=8, out_channels=16):
@@ -157,7 +163,10 @@ class DigitCaps(nn.Module):
         summary_variables(self.writer, 'dight_caps/c_ij', c_ij)
 
         if args.profile_eval_by_category:
-            self.writer.add_images('dight_caps/c_ij_distribution', c_ij.squeeze(3).squeeze(3).view(1, 96, -1).unsqueeze(0), global_step_train)
+            if args.dataset == 'svhn':
+                self.writer.add_images('dight_caps/c_ij_distribution', c_ij.squeeze(3).squeeze(3).view(1, 128, -1).unsqueeze(0), global_step_train)
+            else:
+                self.writer.add_images('dight_caps/c_ij_distribution', c_ij.squeeze(3).squeeze(3).view(1, 96, -1).unsqueeze(0), global_step_train)
             #self.writer.add_images('dight_caps/c_ij_distribution_raw', c_ij.squeeze(3).squeeze(3).unsqueeze(0), global_step_train)
             self.plot_cij_by_capsule(c_ij)
             self.plot_cij_all(c_ij)
@@ -177,12 +186,20 @@ class DigitCaps(nn.Module):
         return leaky_routing[:,:,1:,:]
     
     def plot_cij_by_capsule(self, c_ij):
-        routes = c_ij.reshape(6,6,32,10).mean(dim=0).mean(dim=0)[:,args.profile_category]
+        if args.dataset == 'svhn':
+            routes = c_ij.reshape(8,8,32,10).mean(dim=0).mean(dim=0)[:,args.profile_category]
+        else:
+            routes = c_ij.reshape(6,6,32,10).mean(dim=0).mean(dim=0)[:,args.profile_category]
         for i in range(32):
             self.writer.add_scalar('digit_caps/c_capsule{0}'.format(i), routes[i], global_step_train)
+
     def plot_cij_all(self, c_ij):
-        routes = c_ij.reshape(1152, 10)[:,args.profile_category]
-        for i in range(1152):
+        if args.dataset == 'svhn':
+            routes = c_ij.reshape(2048, 10)[:,args.profile_category]
+        else:
+            routes = c_ij.reshape(1152, 10)[:,args.profile_category]
+
+        for i in range(2048):
             self.writer.add_scalar('digit_caps/c_ij{0}'.format(i), routes[i], global_step_train)
     def add_writer(self, writer):
         self.writer = writer
@@ -217,7 +234,12 @@ class CapsNet(nn.Module):
         super(CapsNet, self).__init__()
         self.conv_layer = ConvLayer(in_channels = 1 if args.dataset == 'mnist' or args.dataset == 'f-mnist' else 3)
         self.primary_capsules = PrimaryCaps(num_capsules = args.num_capsules)
-        self.digit_capsules = DigitCaps(num_routes = 32 * 6 * 6 if args.dataset == 'mnist' or args.dataset == 'f-mnist' else 64 * 8 * 8)
+        if args.dataset == 'mnist' or args.dataset == 'f-mnist':
+            self.digit_capsules = DigitCaps(num_routes = 32 * 6 * 6)
+        elif args.dataset == 'svhn':
+            self.digit_capsules = DigitCaps(num_routes = 8 * 8 * 32)
+        elif args.dataset == 'cifar10':
+            self.digit_capsules = DigitCaps(num_routes = 64 * 8 * 8)
         self.decoder = Decoder()
         
         self.mse_loss = nn.MSELoss()
@@ -387,7 +409,7 @@ def eval_experiment():
         test_loss += loss
         correct_predictions += correct
         total_predictions += total
-    
+
     print ('test accuracy: ', correct_predictions / total_predictions, 'correct: ', correct_predictions, 'total: ', total_predictions)
     print ("test loss: ", test_loss / len(dataset.test_loader))
     
